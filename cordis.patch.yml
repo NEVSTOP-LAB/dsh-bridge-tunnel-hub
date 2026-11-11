@@ -1,0 +1,5 @@
+# dsh-bridge-tunnel-hub bundle patch
+- insert:
+    - id: dsh-bridge-tunnel-hub
+      name: dsh-bridge-tunnel-hub
+      config: {}

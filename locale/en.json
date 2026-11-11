@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Bridge tunnel hub",
+    "description": "Publishes this machine's dsh-bridge public tunnel address into one private gist and answers every machine's current address."
+  }
+}

@@ -1,0 +1,58 @@
+{
+  "name": "dsh-bridge-tunnel-hub",
+  "version": "0.1.0",
+  "description": "把每台机器上 dsh-bridge 的公网隧道地址汇总到一个 Gist：地址变了自动更新，任何一台机器随时查得到",
+  "type": "module",
+  "main": "lib/index.js",
+  "exports": {
+    ".": "./lib/index.js",
+    "./cordis.patch.yml": "./cordis.patch.yml",
+    "./locale/*.json": "./locale/*.json",
+    "./icon": "./icon.svg",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib",
+    "locale/*.json",
+    "cordis.patch.yml",
+    "icon.svg",
+    "README.md",
+    "LICENSE"
+  ],
+  "license": "MIT",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "test": "node --test test/*.test.mjs"
+  },
+  "dependencies": {
+    "@deepseek-ai/schemastery": "^3.18.5"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "icon": "./icon.svg",
+  "keywords": [
+    "dsh",
+    "deepseek-harness",
+    "dsh-plugin",
+    "cordis-plugin",
+    "dsh-bridge",
+    "cloudflare",
+    "cloudflared",
+    "tunnel",
+    "gist",
+    "remote-access"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/NEVSTOP-LAB/dsh-bridge-tunnel-hub.git"
+  },
+  "bugs": {
+    "url": "https://github.com/NEVSTOP-LAB/dsh-bridge-tunnel-hub/issues"
+  },
+  "homepage": "https://github.com/NEVSTOP-LAB/dsh-bridge-tunnel-hub#readme"
+}

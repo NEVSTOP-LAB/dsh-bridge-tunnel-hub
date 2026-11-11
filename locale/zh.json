@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "隧道地址汇总",
+    "description": "把本机 dsh-bridge 的公网隧道地址写进一个私有 Gist，并随时回答所有机器当前的地址。"
+  }
+}
