@@ -79,6 +79,26 @@ test('gh 通道把 404 转成带状态码的错误', async () => {
   await assert.rejects(() => transport.read({ id: 'c'.repeat(32) }), (error) => error.status === 404)
 })
 
+test('gh 通道可以列出账号下的 Gist（用于加入已有登记）', async () => {
+  const runner = async (args) => {
+    if (args[0] === '--version') return { code: 0, stdout: 'gh version 2.0.0', stderr: '' }
+    if (args[0] === 'api' && String(args[1]).startsWith('/gists?per_page=100')) {
+      return {
+        code: 0,
+        stdout: JSON.stringify([{ id: GIST_ID, description: 'dsh-bridge-tunnel-hub', created_at: '2026-11-11T00:00:00Z', updated_at: '2026-11-11T01:00:00Z' }]),
+        stderr: '',
+      }
+    }
+    return { code: 1, stdout: '', stderr: 'gh: Not Found (HTTP 404)' }
+  }
+  const transport = createCliTransport({ runner })
+  const gists = await transport.list()
+  assert.equal(gists.length, 1)
+  assert.equal(gists[0].id, GIST_ID)
+  assert.equal(gists[0].description, 'dsh-bridge-tunnel-hub')
+  assert.equal(gists[0].createdAt, '2026-11-11T00:00:00Z')
+})
+
 test('通道选择：有 gh 走 gh，没有 gh 走 REST', async () => {
   const fake = createFakeGitHub()
   const viaCli = await createGistTransport({ ghAvailable: async () => true })
