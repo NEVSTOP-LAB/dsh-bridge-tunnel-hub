@@ -38,9 +38,9 @@ token 的取用顺序：插件设置里的 `token` → 环境变量 `GH_TOKEN` /
 | 文件 | 内容 |
 |---|---|
 | `tunnels.md` | 一行一台机器，Markdown 链接 + 最后在线时间：`- [thinkcentre-yao](https://xxx.trycloudflare.com) — 2026-11-12 08:45 +08:00` |
-| `status.json` | 每台机器最后一次确认在线的时间、机器 ID 与隧道类型 |
+| `dsh-bridge-tunnel-hub.json` | 每台机器最后一次确认在线的时间、机器 ID 与隧道类型 |
 
-`status.json` 里只保留判断在线所需的最小信息：
+`dsh-bridge-tunnel-hub.json` 里只保留判断在线所需的最小信息：
 
 ```json
 {
@@ -99,7 +99,7 @@ token 的取用顺序：插件设置里的 `token` → 环境变量 `GH_TOKEN` /
 
 对外地址一律收敛成 `scheme://host`：查询串、片段、路径全部丢弃，所以带 `?auth=` 的扫码免密地址不会被写进 Gist。
 
-升级自 0.1.x 时，旧的 `tunnels.txt` 会在下一次上报时并入 `tunnels.md` 并自动删除，不需要手工迁移；旧条目没有时间，等那台机器下一次刷新时会补上。
+升级时旧文件会自动迁移，不需要手工处理：`tunnels.txt` 并入 `tunnels.md` 后删除；`status.json` 改名为 `dsh-bridge-tunnel-hub.json` 后删除旧名。旧条目没有时间，等那台机器下一次刷新时会补上。
 
 ## 安全边界
 

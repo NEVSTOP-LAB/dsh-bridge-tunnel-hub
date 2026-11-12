@@ -68,7 +68,7 @@ test('首次启动自动创建 Gist，写入可点击链接与最小状态字段
     assert.match(fake.readFile('tunnels.md'), mdLinePattern('pc-a', 'https://pc-a-first.trycloudflare.com'))
     assert.equal(fake.readFile('tunnels.txt'), null)
 
-    const status = JSON.parse(fake.readFile('status.json'))
+    const status = JSON.parse(fake.readFile('dsh-bridge-tunnel-hub.json'))
     assert.equal(status.version, 1)
     const machine = status.machines['pc-a']
     assert.deepEqual(Object.keys(machine).sort(), ['kind', 'machineId', 'name', 'updatedAt', 'url'])
@@ -86,10 +86,10 @@ test('地址没变时不产生新的写入', async () => {
   await withHarness(async ({ fake, createHub }) => {
     const hub = createHub()
     await hub.init()
-    const updatedAt = JSON.parse(fake.readFile('status.json')).machines['pc-a'].updatedAt
+    const updatedAt = JSON.parse(fake.readFile('dsh-bridge-tunnel-hub.json')).machines['pc-a'].updatedAt
     const result = await hub.publishNow()
     assert.equal(result.unchanged, true)
-    assert.equal(JSON.parse(fake.readFile('status.json')).machines['pc-a'].updatedAt, updatedAt)
+    assert.equal(JSON.parse(fake.readFile('dsh-bridge-tunnel-hub.json')).machines['pc-a'].updatedAt, updatedAt)
   })
 })
 
@@ -106,7 +106,7 @@ test('地址变化时只更新本机那一行，别的机器原样保留', async
     const markdown = fake.readFile('tunnels.md')
     assert.match(markdown, /^- \[laptop\]\(https:\/\/laptop\.trycloudflare\.com\)\n/)
     assert.match(markdown, mdLinePattern('pc-a', 'https://pc-a-second.trycloudflare.com'))
-    const status = JSON.parse(fake.readFile('status.json'))
+    const status = JSON.parse(fake.readFile('dsh-bridge-tunnel-hub.json'))
     assert.equal(status.machines['pc-a'].url, 'https://pc-a-second.trycloudflare.com')
     assert.equal(status.machines['laptop'], undefined)
   })
@@ -119,7 +119,7 @@ test('改机器名后旧名字那一行被删除', async () => {
     const renamed = createHub({ name: 'workstation' })
     await renamed.init()
     assert.match(fake.readFile('tunnels.md'), mdLinePattern('workstation', 'https://pc-a-first.trycloudflare.com'))
-    const status = JSON.parse(fake.readFile('status.json'))
+    const status = JSON.parse(fake.readFile('dsh-bridge-tunnel-hub.json'))
     assert.deepEqual(Object.keys(status.machines), ['workstation'])
   })
 })
@@ -161,14 +161,14 @@ test('心跳：地址不变也会刷新最后在线时间（链接与状态同�
     const hub = createHub({ now: () => new Date(clock) })
     await hub.init()
     const beforeMarkdown = fake.readFile('tunnels.md')
-    const beforeStatus = JSON.parse(fake.readFile('status.json')).machines['pc-a']
+    const beforeStatus = JSON.parse(fake.readFile('dsh-bridge-tunnel-hub.json')).machines['pc-a']
 
     clock = new Date(2026, 10, 12, 12, 0, 0)
     const result = await hub.scan({ heartbeat: true })
     assert.equal(result.ok, true)
 
     const afterMarkdown = fake.readFile('tunnels.md')
-    const afterStatus = JSON.parse(fake.readFile('status.json')).machines['pc-a']
+    const afterStatus = JSON.parse(fake.readFile('dsh-bridge-tunnel-hub.json')).machines['pc-a']
     assert.notEqual(afterMarkdown, beforeMarkdown)
     assert.notEqual(afterStatus.updatedAt, beforeStatus.updatedAt)
     assert.ok(Date.parse(afterStatus.updatedAt) > Date.parse(beforeStatus.updatedAt))
@@ -194,6 +194,27 @@ test('旧版 tunnels.txt 自动迁移成 tunnels.md 并删除旧文件', async (
     assert.match(markdown, mdLinePattern('pc-a', 'https://pc-a-first.trycloudflare.com'))
     // 旧格式里的机器名没有时间，迁移后先保留无时间形态，等它自己上报时补上
     assert.match(markdown, /^- \[laptop\]\(https:\/\/laptop\.trycloudflare\.com\)$/m)
+  })
+})
+
+test('旧版 status.json 自动迁移到 dsh-bridge-tunnel-hub.json 并删除旧文件', async () => {
+  await withHarness(async ({ fake, createHub }) => {
+    const hub = createHub()
+    await hub.init()
+    const statusText = fake.readFile('dsh-bridge-tunnel-hub.json')
+    // 还原成"只存在旧文件名"的 Gist 状态
+    fake.writeFile('status.json', statusText)
+    fake.deleteFile('dsh-bridge-tunnel-hub.json')
+
+    await hub.publishNow()
+    assert.equal(fake.readFile('status.json'), null)
+    assert.equal(fake.readFile('dsh-bridge-tunnel-hub.json'), statusText)
+
+    // 读取侧也认旧文件名（迁移前的 Gist 仍可列出）
+    fake.writeFile('status.json', statusText)
+    fake.deleteFile('dsh-bridge-tunnel-hub.json')
+    const listed = await hub.list({ probe: false })
+    assert.equal(listed.machines[0].updatedAt, JSON.parse(statusText).machines['pc-a'].updatedAt)
   })
 })
 

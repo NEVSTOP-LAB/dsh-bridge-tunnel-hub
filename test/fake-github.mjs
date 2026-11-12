@@ -83,5 +83,11 @@ export function createFakeGitHub({ id = 'a'.repeat(32) } = {}) {
     if (gist) gist.files[name] = content
   }
 
-  return { fetchImpl, gists, readFile, writeFile, id }
+  /** 模拟删除 Gist 里的某个文件。 */
+  function deleteFile(name) {
+    const gist = gists.get(id)
+    if (gist) delete gist.files[name]
+  }
+
+  return { fetchImpl, gists, readFile, writeFile, deleteFile, id }
 }
