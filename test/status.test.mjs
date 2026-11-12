@@ -35,6 +35,17 @@ test('改名按机器 ID 换键，不留孤儿条目', () => {
   assert.equal(findMachineNameById(renamed, 'id-a'), 'workstation')
 })
 
+test('按原有位置替换条目，不把本机条目挪到末尾', () => {
+  const base = upsertStatusMachine(parseStatus(''), machine, '2026-11-11T00:00:00.000Z')
+  const other = upsertStatusMachine(base, { name: 'pc-b', machineId: 'id-b', url: 'https://b' }, '2026-11-11T01:00:00.000Z')
+  assert.deepEqual(Object.keys(other.machines), ['pc-a', 'pc-b'])
+
+  // 本机条目本来在第一位：再写一次仍应在第一位，否则两台机器会轮流翻转顺序、每次都算"有变化"
+  const again = upsertStatusMachine(other, { ...machine, url: 'https://a2' }, '2026-11-11T02:00:00.000Z')
+  assert.deepEqual(Object.keys(again.machines), ['pc-a', 'pc-b'])
+  assert.equal(again.machines['pc-a'].url, 'https://a2')
+})
+
 test('序列化后能再解析回来', () => {
   const status = upsertStatusMachine(parseStatus(''), machine, '2026-11-11T00:00:00.000Z')
   const round = parseStatus(serializeStatus(status))

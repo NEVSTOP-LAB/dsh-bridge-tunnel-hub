@@ -156,6 +156,37 @@ test('list 列出全部机器并标注可达性与心跳新鲜度', async () => 
   })
 })
 
+test('状态文件里本机条目不在末尾也不会被重写（避免两台机器轮流翻转顺序）', async () => {
+  await withHarness(async ({ fake, createHub }) => {
+    const hub = createHub()
+    await hub.init()
+
+    // 模拟另一台机器写过的顺序：本机在前、另一台在后
+    const current = JSON.parse(fake.readFile('dsh-bridge-tunnel-hub.json'))
+    const reordered = {
+      version: current.version,
+      generatedAt: current.generatedAt,
+      machines: {
+        'pc-a': current.machines['pc-a'],
+        laptop: {
+          name: 'laptop',
+          machineId: 'id-laptop',
+          url: 'https://laptop.trycloudflare.com',
+          kind: 'quick',
+          updatedAt: '2026-11-12T00:00:00.000Z',
+        },
+      },
+    }
+    const text = `${JSON.stringify(reordered, null, 2)}\n`
+    fake.writeFile('dsh-bridge-tunnel-hub.json', text)
+    fake.writeFile('tunnels.md', `${fake.readFile('tunnels.md')}- [laptop](https://laptop.trycloudflare.com) — 2026-11-12 08:00 +08:00\n`)
+
+    const result = await hub.publishNow()
+    assert.equal(result.unchanged, true)
+    assert.equal(fake.readFile('dsh-bridge-tunnel-hub.json'), text, '状态文件不应被重写')
+  })
+})
+
 test('心跳：地址不变也会刷新最后在线时间（链接与状态同步刷新）', async () => {
   await withHarness(async ({ fake, createHub }) => {
     let clock = new Date(2026, 10, 12, 8, 45, 0)
