@@ -46,6 +46,15 @@ test('无 token 也能读 secret Gist', async () => {
   assert.equal(read.files['tunnels.txt'], 'x:y\n')
 })
 
+test('patchGist 传 null 删除旧文件（迁移用）', async () => {
+  const fake = createFakeGitHub()
+  await createGist({ token: 't', files: { 'tunnels.txt': 'x\n', 'tunnels.md': '- [x](https://x)\n' }, fetchImpl: fake.fetchImpl })
+  await patchGist({ id: fake.id, token: 't', files: { 'tunnels.txt': null }, fetchImpl: fake.fetchImpl })
+  const read = await readGist({ id: fake.id, fetchImpl: fake.fetchImpl })
+  assert.equal(read.files['tunnels.txt'], undefined)
+  assert.equal(read.files['tunnels.md'], '- [x](https://x)\n')
+})
+
 test('HTTP 错误转成带状态码的 GistError', async () => {
   const unauthorized = async () => ({ ok: false, status: 401, text: async () => '{"message":"Bad credentials"}' })
   await assert.rejects(

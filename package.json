@@ -1,6 +1,6 @@
 {
   "name": "dsh-bridge-tunnel-hub",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "description": "把每台机器上 dsh-bridge 的公网隧道地址汇总到一个 Gist：地址变了自动更新，任何一台机器随时查得到",
   "type": "module",
   "main": "lib/index.js",

@@ -6,7 +6,7 @@ import test from 'node:test'
 import { createFakeGitHub } from './fake-github.mjs'
 import { normalizeConfig } from '../lib/config.js'
 import { LocalState } from '../lib/state.js'
-import { TunnelHub } from '../lib/hub.js'
+import { TunnelHub, msUntilNextAlignedHour } from '../lib/hub.js'
 import { createRestTransport } from '../lib/transport.js'
 
 const silentLogger = { info() {}, warn() {}, error() {} }
@@ -32,6 +32,7 @@ async function withHarness(fn, { machineName = 'pc-a', autoPublish = true } = {}
       bridgeConfigPath: configPath,
       autoPublish,
       scanIntervalSec: 5,
+      heartbeatHours: 4,
     })
     const state = new LocalState(statePath)
     return new TunnelHub({
@@ -51,17 +52,25 @@ async function withHarness(fn, { machineName = 'pc-a', autoPublish = true } = {}
   }
 }
 
-test('首次启动自动创建 Gist，并写入本机一行', async () => {
+test('首次启动自动创建 Gist，写入可点击链接与最小状态字段', async () => {
   await withHarness(async ({ fake, createHub }) => {
     const hub = createHub()
     await hub.init()
     assert.equal(hub.machineName, 'pc-a')
-    assert.equal(fake.readFile('tunnels.txt'), 'pc-a:https://pc-a-first.trycloudflare.com\n')
+    assert.equal(fake.readFile('tunnels.md'), '- [pc-a](https://pc-a-first.trycloudflare.com)\n')
+    assert.equal(fake.readFile('tunnels.txt'), null)
+
     const status = JSON.parse(fake.readFile('status.json'))
     assert.equal(status.version, 1)
-    assert.equal(status.machines['pc-a'].url, 'https://pc-a-first.trycloudflare.com')
-    assert.equal(status.machines['pc-a'].kind, 'quick')
-    assert.ok(status.machines['pc-a'].updatedAt)
+    const machine = status.machines['pc-a']
+    assert.deepEqual(Object.keys(machine).sort(), ['kind', 'machineId', 'name', 'updatedAt', 'url'])
+    assert.equal(machine.url, 'https://pc-a-first.trycloudflare.com')
+    assert.equal(machine.kind, 'quick')
+    assert.ok(machine.updatedAt)
+    // 版本与平台类字段不再写入汇总，降低泄露后的信息量
+    assert.equal(machine.bridgeVersion, undefined)
+    assert.equal(machine.node, undefined)
+    assert.equal(machine.platform, undefined)
   })
 })
 
@@ -80,16 +89,15 @@ test('地址变化时只更新本机那一行，别的机器原样保留', async
   await withHarness(async ({ fake, createHub, setQuickTunnel }) => {
     const hub = createHub()
     await hub.init()
-    // 模拟另一台机器已经上报过
-    fake.writeFile('tunnels.txt', `laptop:https://laptop.trycloudflare.com\n${fake.readFile('tunnels.txt')}`)
+    fake.writeFile('tunnels.md', `- [laptop](https://laptop.trycloudflare.com)\n${fake.readFile('tunnels.md')}`)
 
     await setQuickTunnel('pc-a-second')
     const result = await hub.publishNow()
     assert.equal(result.ok, true)
     assert.equal(result.url, 'https://pc-a-second.trycloudflare.com')
     assert.equal(
-      fake.readFile('tunnels.txt'),
-      'laptop:https://laptop.trycloudflare.com\npc-a:https://pc-a-second.trycloudflare.com\n',
+      fake.readFile('tunnels.md'),
+      '- [laptop](https://laptop.trycloudflare.com)\n- [pc-a](https://pc-a-second.trycloudflare.com)\n',
     )
     const status = JSON.parse(fake.readFile('status.json'))
     assert.equal(status.machines['pc-a'].url, 'https://pc-a-second.trycloudflare.com')
@@ -103,7 +111,7 @@ test('改机器名后旧名字那一行被删除', async () => {
     await hub.init()
     const renamed = createHub({ name: 'workstation' })
     await renamed.init()
-    assert.equal(fake.readFile('tunnels.txt'), 'workstation:https://pc-a-first.trycloudflare.com\n')
+    assert.equal(fake.readFile('tunnels.md'), '- [workstation](https://pc-a-first.trycloudflare.com)\n')
     const status = JSON.parse(fake.readFile('status.json'))
     assert.deepEqual(Object.keys(status.machines), ['workstation'])
   })
@@ -113,25 +121,61 @@ test('autoPublish 关闭时只采集、不写 Gist', async () => {
   await withHarness(async ({ fake, createHub }) => {
     const hub = createHub()
     await hub.init()
-    assert.equal(fake.readFile('tunnels.txt'), null)
+    assert.equal(fake.readFile('tunnels.md'), null)
     const self = await hub.self()
     assert.equal(self.tunnel.url, 'https://pc-a-first.trycloudflare.com')
   }, { autoPublish: false })
 })
 
-test('list 列出全部机器并标注可达性', async () => {
+test('list 列出全部机器并标注可达性与心跳新鲜度', async () => {
   await withHarness(async ({ fake, createHub }) => {
     const hub = createHub()
     await hub.init()
-    fake.writeFile('tunnels.txt', `${fake.readFile('tunnels.txt')}laptop:https://laptop.trycloudflare.com\n`)
+    fake.writeFile('tunnels.md', `${fake.readFile('tunnels.md')}- [laptop](https://laptop.trycloudflare.com)\n`)
     const listed = await hub.list()
+    assert.equal(listed.heartbeatHours, 4)
     assert.equal(listed.machines.length, 2)
+
     const laptop = listed.machines.find((machine) => machine.name === 'laptop')
     assert.equal(laptop.reachable, true)
     assert.equal(laptop.ageSeconds, null)
+    assert.equal(laptop.stale, null)
+
     const self = listed.machines.find((machine) => machine.self)
     assert.equal(self.name, 'pc-a')
     assert.ok(self.updatedAt)
+    assert.equal(self.stale, false)
+  })
+})
+
+test('心跳：地址不变也会刷新最后在线时间', async () => {
+  await withHarness(async ({ fake, createHub }) => {
+    const hub = createHub()
+    await hub.init()
+    const before = JSON.parse(fake.readFile('status.json')).machines['pc-a'].updatedAt
+
+    await new Promise((resolve) => setTimeout(resolve, 15))
+    const result = await hub.scan({ heartbeat: true })
+    assert.equal(result.ok, true)
+    const after = JSON.parse(fake.readFile('status.json')).machines['pc-a'].updatedAt
+    assert.notEqual(after, before)
+    assert.ok(Date.parse(after) > Date.parse(before))
+    // 链接内容不因心跳而变化
+    assert.equal(fake.readFile('tunnels.md'), '- [pc-a](https://pc-a-first.trycloudflare.com)\n')
+  })
+})
+
+test('旧版 tunnels.txt 自动迁移成 tunnels.md 并删除旧文件', async () => {
+  await withHarness(async ({ fake, createHub }) => {
+    const hub = createHub()
+    await hub.init()
+    fake.writeFile('tunnels.txt', 'laptop:https://laptop.trycloudflare.com\n')
+    await hub.publishNow()
+    assert.equal(fake.readFile('tunnels.txt'), null)
+    assert.equal(
+      fake.readFile('tunnels.md'),
+      '- [pc-a](https://pc-a-first.trycloudflare.com)\n- [laptop](https://laptop.trycloudflare.com)\n',
+    )
   })
 })
 
@@ -139,7 +183,7 @@ test('探活失败时不把死地址写出去', async () => {
   await withHarness(async ({ fake, createHub, setQuickTunnel }) => {
     const hub = createHub()
     await hub.init()
-    fake.writeFile('tunnels.txt', 'pc-a:https://pc-a-first.trycloudflare.com\n')
+    fake.writeFile('tunnels.md', '- [pc-a](https://pc-a-first.trycloudflare.com)\n')
 
     // 探活失败：让假 GitHub 拒绝隧道域名请求
     const failingFetch = async (url, options) => {
@@ -153,6 +197,19 @@ test('探活失败时不把死地址写出去', async () => {
     const result = await hub.scan({ force: false })
     assert.equal(result.ok, false)
     assert.match(result.error, /暂不可用/)
-    assert.equal(fake.readFile('tunnels.txt'), 'pc-a:https://pc-a-first.trycloudflare.com\n')
+    assert.equal(fake.readFile('tunnels.md'), '- [pc-a](https://pc-a-first.trycloudflare.com)\n')
   })
+})
+
+test('心跳时间对齐到本地整点的整数倍', () => {
+  const at0840 = new Date(2026, 10, 12, 8, 40, 0)
+  assert.equal(msUntilNextAlignedHour(4, at0840), 3 * 3600_000 + 20 * 60_000)
+
+  const at1200 = new Date(2026, 10, 12, 12, 0, 0)
+  assert.equal(msUntilNextAlignedHour(4, at1200), 4 * 3600_000)
+
+  const at2359 = new Date(2026, 10, 12, 23, 59, 0)
+  assert.equal(msUntilNextAlignedHour(4, at2359), 60_000)
+
+  assert.equal(msUntilNextAlignedHour(0, at0840), null)
 })

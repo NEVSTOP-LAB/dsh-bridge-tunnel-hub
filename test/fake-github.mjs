@@ -61,7 +61,10 @@ export function createFakeGitHub({ id = 'a'.repeat(32) } = {}) {
 
     if (method === 'GET') return json(200, toPayload(gist))
     if (method === 'PATCH') {
-      for (const [name, file] of Object.entries(body?.files ?? {})) gist.files[name] = file?.content ?? ''
+      for (const [name, file] of Object.entries(body?.files ?? {})) {
+        if (file === null) delete gist.files[name]
+        else gist.files[name] = file?.content ?? ''
+      }
       if (typeof body?.description === 'string' && body.description.length > 0) gist.description = body.description
       gist.updated_at = new Date().toISOString()
       return json(200, toPayload(gist))

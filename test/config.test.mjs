@@ -26,3 +26,11 @@ test('autoPublish 只有显式 false 才关闭', () => {
   assert.equal(normalizeConfig({ autoPublish: 'no' }).autoPublish, true)
   assert.equal(normalizeConfig({}).autoPublish, true)
 })
+
+test('心跳间隔默认 4 小时，可关可夹', () => {
+  assert.equal(normalizeConfig({}).heartbeatHours, 4)
+  assert.equal(normalizeConfig({ heartbeatHours: 0 }).heartbeatHours, 0)
+  assert.equal(normalizeConfig({ heartbeatHours: 100 }).heartbeatHours, 24)
+  assert.equal(normalizeConfig({ heartbeatHours: 'abc' }).heartbeatHours, 4)
+  assert.equal(normalizeConfig({ heartbeatHours: 6.4 }).heartbeatHours, 6)
+})
