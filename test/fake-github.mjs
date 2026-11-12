@@ -20,6 +20,7 @@ export function createFakeGitHub({ id = 'a'.repeat(32) } = {}) {
     return {
       id: gist.id,
       description: gist.description,
+      created_at: gist.created_at,
       updated_at: gist.updated_at,
       html_url: gist.html_url,
       files: Object.fromEntries(
@@ -42,11 +43,22 @@ export function createFakeGitHub({ id = 'a'.repeat(32) } = {}) {
       return json(200, { enabled: true })
     }
 
+    if (parsed.pathname === '/gists' && method === 'GET') {
+      return json(200, [...gists.values()].map((gist) => ({
+        id: gist.id,
+        description: gist.description,
+        created_at: gist.created_at,
+        updated_at: gist.updated_at,
+        files: toPayload(gist).files,
+      })))
+    }
+
     if (parsed.pathname === '/gists' && method === 'POST') {
       const gist = {
         id,
         description: body?.description ?? '',
         files: materialize(body?.files),
+        created_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
         html_url: `https://gist.github.com/${id}`,
       }

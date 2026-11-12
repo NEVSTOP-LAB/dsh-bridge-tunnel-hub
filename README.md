@@ -25,10 +25,15 @@ dsh plugin --profile <profile> add github:NEVSTOP-LAB/dsh-bridge-tunnel-hub
 ## 首次运行
 
 1. 插件启动后自动扫描 `~/.dsh-bridge/cloudflared.log`（或 dsh-bridge 的固定域名配置）拿到本机地址；
-2. 探活通过后，用一个有 `gist` 权限的 GitHub token 创建 secret Gist，Gist 描述就是本插件名；
+2. 如果本机还没有登记 Gist，先在**账号下查找描述为插件名的已有 Gist**：
+   - 找到就加入它（不会另建一个），已有其它机器的条目原样保留；
+   - 找不到才创建新的 secret Gist；
 3. Gist ID 记在本机状态文件里，后续只做读改写。
 
 token 的取用顺序：插件设置里的 `token` → 环境变量 `GH_TOKEN` / `GITHUB_TOKEN` → `gh auth token`。本机装了 gh 并登录过就不需要额外配置。
+
+> [!NOTE]
+> 多台机器都会自动加入账号里最早创建的那个登记 Gist。账号里如果已经存在多个（比如旧版本各建了一个），插件会加入最早创建的那个并在日志里告警，其余需要手动删除——或者先把要保留的那个填进设置里的「Gist 链接」，再让其它机器保存即可。
 
 > [!NOTE]
 > Gist 属于创建它的那个 GitHub 账号。多台机器要写入同一个 Gist，就必须使用同一个账号的 token；只读的机器不需要 token。

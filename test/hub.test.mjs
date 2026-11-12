@@ -9,6 +9,7 @@ import { LocalState } from '../lib/state.js'
 import { TunnelHub, msUntilNextAlignedHour } from '../lib/hub.js'
 import { createRestTransport } from '../lib/transport.js'
 import { parseTunnelEntries } from '../lib/tunnels.js'
+import { createGist } from '../lib/gist.js'
 
 const silentLogger = { info() {}, warn() {}, error() {} }
 
@@ -215,6 +216,48 @@ test('旧版 status.json 自动迁移到 dsh-bridge-tunnel-hub.json 并删除旧
     fake.deleteFile('dsh-bridge-tunnel-hub.json')
     const listed = await hub.list({ probe: false })
     assert.equal(listed.machines[0].updatedAt, JSON.parse(statusText).machines['pc-a'].updatedAt)
+  })
+})
+
+test('首次运行会先加入已有登记 Gist，而不是再建一个', async () => {
+  await withHarness(async ({ fake, createHub }) => {
+    // 模拟账号里已经有一个别的机器建好的登记 Gist
+    const seeded = createFakeGitHub({ id: 'c'.repeat(32) })
+    const existing = await createGist({
+      token: 't',
+      description: 'dsh-bridge-tunnel-hub',
+      files: {
+        'tunnels.md': '- [laptop](https://laptop.trycloudflare.com) — 2026-11-12 08:00 +08:00\n',
+        'dsh-bridge-tunnel-hub.json': JSON.stringify({
+          version: 1,
+          generatedAt: '2026-11-12T00:00:00.000Z',
+          machines: {
+            laptop: {
+              name: 'laptop',
+              machineId: 'id-laptop',
+              url: 'https://laptop.trycloudflare.com',
+              kind: 'quick',
+              updatedAt: '2026-11-12T00:00:00.000Z',
+            },
+          },
+        }),
+      },
+      fetchImpl: seeded.fetchImpl,
+    })
+
+    // 把已有 Gist 挪进本次测试的 fake，并清掉本地状态（模拟第一次运行）
+    fake.gists.set(seeded.id, seeded.gists.get(seeded.id))
+    const hub = createHub()
+    await hub.init()
+
+    assert.equal(hub.gistId, existing.id)
+    assert.equal(fake.gists.size, 1, '不应新建第二个 Gist')
+    const joined = fake.gists.get(existing.id)
+    const markdown = joined.files['tunnels.md']
+    assert.match(markdown, /laptop/)
+    assert.match(markdown, mdLinePattern('pc-a', 'https://pc-a-first.trycloudflare.com'))
+    const status = JSON.parse(joined.files['dsh-bridge-tunnel-hub.json'])
+    assert.deepEqual(Object.keys(status.machines).sort(), ['laptop', 'pc-a'])
   })
 })
 
