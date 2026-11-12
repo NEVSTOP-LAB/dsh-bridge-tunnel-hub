@@ -25,8 +25,9 @@ dsh plugin --profile <profile> add github:NEVSTOP-LAB/dsh-bridge-tunnel-hub
 ## 首次运行
 
 1. 插件启动后自动扫描 `~/.dsh-bridge/cloudflared.log`（或 dsh-bridge 的固定域名配置）拿到本机地址；
-2. 如果本机还没有登记 Gist，先在**账号下查找描述为插件名的已有 Gist**：
+2. 如果本机还没有登记 Gist，先在**账号下搜索已有登记**：描述等于插件名，或文件里同时包含 `tunnels.md` 与 `dsh-bridge-tunnel-hub.json`（描述被改过也能认出来）；
    - 找到就加入它（不会另建一个），已有其它机器的条目原样保留；
+   - 找到多个时优先描述匹配、其次取最早创建的；加入后写入会把描述改回插件名；
    - 找不到才创建新的 secret Gist；
 3. Gist ID 记在本机状态文件里，后续只做读改写。
 
