@@ -156,6 +156,37 @@ test('list 列出全部机器并标注可达性与心跳新鲜度', async () => 
   })
 })
 
+test('状态文件里本机条目不在末尾也不会被重写（避免两台机器轮流翻转顺序）', async () => {
+  await withHarness(async ({ fake, createHub }) => {
+    const hub = createHub()
+    await hub.init()
+
+    // 模拟另一台机器写过的顺序：本机在前、另一台在后
+    const current = JSON.parse(fake.readFile('dsh-bridge-tunnel-hub.json'))
+    const reordered = {
+      version: current.version,
+      generatedAt: current.generatedAt,
+      machines: {
+        'pc-a': current.machines['pc-a'],
+        laptop: {
+          name: 'laptop',
+          machineId: 'id-laptop',
+          url: 'https://laptop.trycloudflare.com',
+          kind: 'quick',
+          updatedAt: '2026-11-12T00:00:00.000Z',
+        },
+      },
+    }
+    const text = `${JSON.stringify(reordered, null, 2)}\n`
+    fake.writeFile('dsh-bridge-tunnel-hub.json', text)
+    fake.writeFile('tunnels.md', `${fake.readFile('tunnels.md')}- [laptop](https://laptop.trycloudflare.com) — 2026-11-12 08:00 +08:00\n`)
+
+    const result = await hub.publishNow()
+    assert.equal(result.unchanged, true)
+    assert.equal(fake.readFile('dsh-bridge-tunnel-hub.json'), text, '状态文件不应被重写')
+  })
+})
+
 test('心跳：地址不变也会刷新最后在线时间（链接与状态同步刷新）', async () => {
   await withHarness(async ({ fake, createHub }) => {
     let clock = new Date(2026, 10, 12, 8, 45, 0)
@@ -219,45 +250,83 @@ test('旧版 status.json 自动迁移到 dsh-bridge-tunnel-hub.json 并删除旧
   })
 })
 
+/** 把一台"已有登记"塞进假 GitHub：可指定 id、描述与创建时间。 */
+async function seedGist(fake, { id, description, createdAt = '2026-11-11T00:00:00.000Z', files }) {
+  const seedFake = createFakeGitHub({ id })
+  await createGist({ token: 't', description, files, fetchImpl: seedFake.fetchImpl })
+  const record = seedFake.gists.get(id)
+  record.created_at = createdAt
+  record.updated_at = createdAt
+  fake.gists.set(id, record)
+  return id
+}
+
+const REGISTRY_FILES = {
+  'tunnels.md': '- [laptop](https://laptop.trycloudflare.com) — 2026-11-12 08:00 +08:00\n',
+  'dsh-bridge-tunnel-hub.json': JSON.stringify({
+    version: 1,
+    generatedAt: '2026-11-12T00:00:00.000Z',
+    machines: {
+      laptop: {
+        name: 'laptop',
+        machineId: 'id-laptop',
+        url: 'https://laptop.trycloudflare.com',
+        kind: 'quick',
+        updatedAt: '2026-11-12T00:00:00.000Z',
+      },
+    },
+  }),
+}
+
 test('首次运行会先加入已有登记 Gist，而不是再建一个', async () => {
   await withHarness(async ({ fake, createHub }) => {
-    // 模拟账号里已经有一个别的机器建好的登记 Gist
-    const seeded = createFakeGitHub({ id: 'c'.repeat(32) })
-    const existing = await createGist({
-      token: 't',
-      description: 'dsh-bridge-tunnel-hub',
-      files: {
-        'tunnels.md': '- [laptop](https://laptop.trycloudflare.com) — 2026-11-12 08:00 +08:00\n',
-        'dsh-bridge-tunnel-hub.json': JSON.stringify({
-          version: 1,
-          generatedAt: '2026-11-12T00:00:00.000Z',
-          machines: {
-            laptop: {
-              name: 'laptop',
-              machineId: 'id-laptop',
-              url: 'https://laptop.trycloudflare.com',
-              kind: 'quick',
-              updatedAt: '2026-11-12T00:00:00.000Z',
-            },
-          },
-        }),
-      },
-      fetchImpl: seeded.fetchImpl,
-    })
-
-    // 把已有 Gist 挪进本次测试的 fake，并清掉本地状态（模拟第一次运行）
-    fake.gists.set(seeded.id, seeded.gists.get(seeded.id))
+    const existingId = await seedGist(fake, { id: 'c'.repeat(32), description: 'dsh-bridge-tunnel-hub', files: REGISTRY_FILES })
     const hub = createHub()
     await hub.init()
 
-    assert.equal(hub.gistId, existing.id)
+    assert.equal(hub.gistId, existingId)
     assert.equal(fake.gists.size, 1, '不应新建第二个 Gist')
-    const joined = fake.gists.get(existing.id)
+    const joined = fake.gists.get(existingId)
     const markdown = joined.files['tunnels.md']
     assert.match(markdown, /laptop/)
     assert.match(markdown, mdLinePattern('pc-a', 'https://pc-a-first.trycloudflare.com'))
     const status = JSON.parse(joined.files['dsh-bridge-tunnel-hub.json'])
     assert.deepEqual(Object.keys(status.machines).sort(), ['laptop', 'pc-a'])
+  })
+})
+
+test('描述被改过的登记 Gist 也能按文件特征复用', async () => {
+  await withHarness(async ({ fake, createHub }) => {
+    const existingId = await seedGist(fake, { id: 'd'.repeat(32), description: '被改过的描述', files: REGISTRY_FILES })
+    const hub = createHub()
+    await hub.init()
+
+    assert.equal(hub.gistId, existingId)
+    assert.equal(fake.gists.size, 1)
+    // 加入后写入会把描述改回插件名
+    assert.equal(fake.gists.get(existingId).description, 'dsh-bridge-tunnel-hub')
+  })
+})
+
+test('描述匹配优先于仅文件匹配', async () => {
+  await withHarness(async ({ fake, createHub }) => {
+    const fileOnlyId = await seedGist(fake, {
+      id: 'e'.repeat(32),
+      description: '被改过的描述',
+      createdAt: '2026-11-10T00:00:00.000Z',
+      files: REGISTRY_FILES,
+    })
+    const describedId = await seedGist(fake, {
+      id: 'f'.repeat(32),
+      description: 'dsh-bridge-tunnel-hub',
+      createdAt: '2026-11-11T00:00:00.000Z',
+      files: REGISTRY_FILES,
+    })
+    const hub = createHub()
+    await hub.init()
+
+    assert.equal(hub.gistId, describedId)
+    assert.notEqual(hub.gistId, fileOnlyId)
   })
 })
 

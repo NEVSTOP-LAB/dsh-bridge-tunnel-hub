@@ -85,7 +85,13 @@ test('gh 通道可以列出账号下的 Gist（用于加入已有登记）', asy
     if (args[0] === 'api' && String(args[1]).startsWith('/gists?per_page=100')) {
       return {
         code: 0,
-        stdout: JSON.stringify([{ id: GIST_ID, description: 'dsh-bridge-tunnel-hub', created_at: '2026-11-11T00:00:00Z', updated_at: '2026-11-11T01:00:00Z' }]),
+        stdout: JSON.stringify([{
+          id: GIST_ID,
+          description: 'dsh-bridge-tunnel-hub',
+          created_at: '2026-11-11T00:00:00Z',
+          updated_at: '2026-11-11T01:00:00Z',
+          files: { 'tunnels.md': { filename: 'tunnels.md', size: 10 }, 'dsh-bridge-tunnel-hub.json': { filename: 'dsh-bridge-tunnel-hub.json', size: 10 } },
+        }]),
         stderr: '',
       }
     }
@@ -97,6 +103,7 @@ test('gh 通道可以列出账号下的 Gist（用于加入已有登记）', asy
   assert.equal(gists[0].id, GIST_ID)
   assert.equal(gists[0].description, 'dsh-bridge-tunnel-hub')
   assert.equal(gists[0].createdAt, '2026-11-11T00:00:00Z')
+  assert.deepEqual(gists[0].files.sort(), ['dsh-bridge-tunnel-hub.json', 'tunnels.md'])
 })
 
 test('通道选择：有 gh 走 gh，没有 gh 走 REST', async () => {
