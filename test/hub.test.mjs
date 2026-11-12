@@ -8,8 +8,15 @@ import { normalizeConfig } from '../lib/config.js'
 import { LocalState } from '../lib/state.js'
 import { TunnelHub, msUntilNextAlignedHour } from '../lib/hub.js'
 import { createRestTransport } from '../lib/transport.js'
+import { parseTunnelEntries } from '../lib/tunnels.js'
 
 const silentLogger = { info() {}, warn() {}, error() {} }
+
+/** 匹配"链接 + 最后在线时间"的一行（多行文本里按行匹配）。 */
+function mdLinePattern(name, url) {
+  const escaped = url.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  return new RegExp(`^- \\[${name}\\]\\(${escaped}\\) — \\d{4}-\\d{2}-\\d{2} \\d{2}:\\d{2} [+-]\\d{2}:\\d{2}$`, 'm')
+}
 
 async function withHarness(fn, { machineName = 'pc-a', autoPublish = true } = {}) {
   const directory = await mkdtemp(join(tmpdir(), 'tunnel-hub-'))
@@ -24,7 +31,7 @@ async function withHarness(fn, { machineName = 'pc-a', autoPublish = true } = {}
   await setQuickTunnel('pc-a-first')
   await writeFile(configPath, JSON.stringify({ cloudflared: {} }), 'utf8')
 
-  function createHub({ name = machineName, token = 'test-token' } = {}) {
+  function createHub({ name = machineName, token = 'test-token', now = () => new Date() } = {}) {
     const config = normalizeConfig({
       machineName: name,
       token,
@@ -42,6 +49,7 @@ async function withHarness(fn, { machineName = 'pc-a', autoPublish = true } = {}
       logger: silentLogger,
       fetchImpl: fake.fetchImpl,
       transport: createRestTransport({ token, fetchImpl: fake.fetchImpl }),
+      now,
     })
   }
 
@@ -57,7 +65,7 @@ test('首次启动自动创建 Gist，写入可点击链接与最小状态字段
     const hub = createHub()
     await hub.init()
     assert.equal(hub.machineName, 'pc-a')
-    assert.equal(fake.readFile('tunnels.md'), '- [pc-a](https://pc-a-first.trycloudflare.com)\n')
+    assert.match(fake.readFile('tunnels.md'), mdLinePattern('pc-a', 'https://pc-a-first.trycloudflare.com'))
     assert.equal(fake.readFile('tunnels.txt'), null)
 
     const status = JSON.parse(fake.readFile('status.json'))
@@ -95,10 +103,9 @@ test('地址变化时只更新本机那一行，别的机器原样保留', async
     const result = await hub.publishNow()
     assert.equal(result.ok, true)
     assert.equal(result.url, 'https://pc-a-second.trycloudflare.com')
-    assert.equal(
-      fake.readFile('tunnels.md'),
-      '- [laptop](https://laptop.trycloudflare.com)\n- [pc-a](https://pc-a-second.trycloudflare.com)\n',
-    )
+    const markdown = fake.readFile('tunnels.md')
+    assert.match(markdown, /^- \[laptop\]\(https:\/\/laptop\.trycloudflare\.com\)\n/)
+    assert.match(markdown, mdLinePattern('pc-a', 'https://pc-a-second.trycloudflare.com'))
     const status = JSON.parse(fake.readFile('status.json'))
     assert.equal(status.machines['pc-a'].url, 'https://pc-a-second.trycloudflare.com')
     assert.equal(status.machines['laptop'], undefined)
@@ -111,7 +118,7 @@ test('改机器名后旧名字那一行被删除', async () => {
     await hub.init()
     const renamed = createHub({ name: 'workstation' })
     await renamed.init()
-    assert.equal(fake.readFile('tunnels.md'), '- [workstation](https://pc-a-first.trycloudflare.com)\n')
+    assert.match(fake.readFile('tunnels.md'), mdLinePattern('workstation', 'https://pc-a-first.trycloudflare.com'))
     const status = JSON.parse(fake.readFile('status.json'))
     assert.deepEqual(Object.keys(status.machines), ['workstation'])
   })
@@ -148,20 +155,31 @@ test('list 列出全部机器并标注可达性与心跳新鲜度', async () => 
   })
 })
 
-test('心跳：地址不变也会刷新最后在线时间', async () => {
+test('心跳：地址不变也会刷新最后在线时间（链接与状态同步刷新）', async () => {
   await withHarness(async ({ fake, createHub }) => {
-    const hub = createHub()
+    let clock = new Date(2026, 10, 12, 8, 45, 0)
+    const hub = createHub({ now: () => new Date(clock) })
     await hub.init()
-    const before = JSON.parse(fake.readFile('status.json')).machines['pc-a'].updatedAt
+    const beforeMarkdown = fake.readFile('tunnels.md')
+    const beforeStatus = JSON.parse(fake.readFile('status.json')).machines['pc-a']
 
-    await new Promise((resolve) => setTimeout(resolve, 15))
+    clock = new Date(2026, 10, 12, 12, 0, 0)
     const result = await hub.scan({ heartbeat: true })
     assert.equal(result.ok, true)
-    const after = JSON.parse(fake.readFile('status.json')).machines['pc-a'].updatedAt
-    assert.notEqual(after, before)
-    assert.ok(Date.parse(after) > Date.parse(before))
-    // 链接内容不因心跳而变化
-    assert.equal(fake.readFile('tunnels.md'), '- [pc-a](https://pc-a-first.trycloudflare.com)\n')
+
+    const afterMarkdown = fake.readFile('tunnels.md')
+    const afterStatus = JSON.parse(fake.readFile('status.json')).machines['pc-a']
+    assert.notEqual(afterMarkdown, beforeMarkdown)
+    assert.notEqual(afterStatus.updatedAt, beforeStatus.updatedAt)
+    assert.ok(Date.parse(afterStatus.updatedAt) > Date.parse(beforeStatus.updatedAt))
+
+    // 链接本身不变，变的只有行尾时间
+    const beforeEntry = parseTunnelEntries(beforeMarkdown)[0]
+    const afterEntry = parseTunnelEntries(afterMarkdown)[0]
+    assert.equal(afterEntry.name, 'pc-a')
+    assert.equal(afterEntry.url, beforeEntry.url)
+    assert.notEqual(afterEntry.updatedAt, beforeEntry.updatedAt)
+    assert.match(afterEntry.updatedAt, /^2026-11-12 12:00 [+-]\d{2}:\d{2}$/)
   })
 })
 
@@ -172,10 +190,10 @@ test('旧版 tunnels.txt 自动迁移成 tunnels.md 并删除旧文件', async (
     fake.writeFile('tunnels.txt', 'laptop:https://laptop.trycloudflare.com\n')
     await hub.publishNow()
     assert.equal(fake.readFile('tunnels.txt'), null)
-    assert.equal(
-      fake.readFile('tunnels.md'),
-      '- [pc-a](https://pc-a-first.trycloudflare.com)\n- [laptop](https://laptop.trycloudflare.com)\n',
-    )
+    const markdown = fake.readFile('tunnels.md')
+    assert.match(markdown, mdLinePattern('pc-a', 'https://pc-a-first.trycloudflare.com'))
+    // 旧格式里的机器名没有时间，迁移后先保留无时间形态，等它自己上报时补上
+    assert.match(markdown, /^- \[laptop\]\(https:\/\/laptop\.trycloudflare\.com\)$/m)
   })
 })
 
