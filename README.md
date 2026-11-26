@@ -1,3 +1,6 @@
+> [!NOTE]
+> 兼容 DSH 0.2.x（`engines.dsh` 见 `package.json`）；实测 `0.2.0-rc.2`、`0.2.1-rc.5`、`0.2.2-rc.5`（Linux CI 逐版本装载验证）。
+
 # dsh-bridge-tunnel-hub
 
 把每台机器上 [dsh-bridge](https://github.com/wenbin-wb/dsh-bridge) 的公网隧道地址汇总到一个 secret Gist：地址变了自动更新，每 4 小时整点刷新一次在线状态，任何一台机器随时查得到。
